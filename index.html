@@ -249,12 +249,26 @@
       }
     }
 
-    // Camera Scanner Controller
+    // Camera Scanner Controller with Frame Rate & Resolution Constraints
     function startCameraScanner() {
       if (!codeReader) {
         codeReader = new ZXing.BrowserMultiFormatReader();
+      } else {
+        codeReader.reset();
       }
-      codeReader.decodeFromVideoDevice(null, 'video-feed', (result, err) => {
+
+      // High-performance, low-power constraints for barcode scanning
+      const constraints = {
+        video: {
+          facingMode: { ideal: "environment" },
+          frameRate: { max: 5, ideal: 5 },
+          width: { ideal: 640, max: 1280 },
+          height: { ideal: 480, max: 720 },
+          focusMode: { ideal: "continuous" }
+        }
+      };
+
+      codeReader.decodeFromConstraints(constraints, 'video-feed', (result, err) => {
         if (result && !isProcessingScan) {
           isProcessingScan = true;
           handleScannedBarcode(result.text.trim());
