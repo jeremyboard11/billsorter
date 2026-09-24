@@ -68,7 +68,7 @@
       </div>
 
       <!-- Live Video Viewfinder (Shown in Camera mode) -->
-      <div id="camera-viewfinder" class="relative bg-black rounded-xl overflow-hidden aspect-video border-2 border-slate-700 shadow-inner">
+      <div id="camera-viewfinder" class="relative bg-black rounded-xl overflow-hidden aspect-video border-2 border-slate-700 shadow-inner transition-colors duration-150">
         <video id="video-feed" class="w-full h-full object-cover"></video>
         <div class="absolute inset-0 border-2 border-dashed border-blue-400/50 pointer-events-none flex items-center justify-center">
           <span class="text-xs text-blue-200/70 bg-black/50 px-2 py-1 rounded">Align Barcode Here</span>
@@ -141,6 +141,18 @@
       gain.connect(audioCtx.destination);
       osc.start();
       gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.15);
+    }
+
+    // Camera Scan Visual Flash Feedback
+    function triggerScanFlash() {
+      const cameraView = document.getElementById('camera-viewfinder');
+      cameraView.classList.remove('border-slate-700');
+      cameraView.classList.add('border-rose-500', 'shadow-lg', 'shadow-rose-500/50');
+      
+      setTimeout(() => {
+        cameraView.classList.remove('border-rose-500', 'shadow-lg', 'shadow-rose-500/50');
+        cameraView.classList.add('border-slate-700');
+      }, 300);
     }
 
     // Step 1: Parse Files & Build Lookup Map
@@ -249,7 +261,7 @@
       }
     }
 
-    // Camera Scanner Controller with Frame Rate & Resolution Constraints
+    // Camera Scanner Controller set to 10 FPS
     function startCameraScanner() {
       if (!codeReader) {
         codeReader = new ZXing.BrowserMultiFormatReader();
@@ -257,11 +269,10 @@
         codeReader.reset();
       }
 
-      // High-performance, low-power constraints for barcode scanning
       const constraints = {
         video: {
           facingMode: { ideal: "environment" },
-          frameRate: { max: 5, ideal: 5 },
+          frameRate: { max: 10, ideal: 10 },
           width: { ideal: 640, max: 1280 },
           height: { ideal: 480, max: 720 },
           focusMode: { ideal: "continuous" }
@@ -271,6 +282,7 @@
       codeReader.decodeFromConstraints(constraints, 'video-feed', (result, err) => {
         if (result && !isProcessingScan) {
           isProcessingScan = true;
+          triggerScanFlash();
           handleScannedBarcode(result.text.trim());
           setTimeout(() => { isProcessingScan = false; }, 800);
         }
