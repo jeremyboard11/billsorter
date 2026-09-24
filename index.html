@@ -20,7 +20,7 @@
   </header>
 
   <!-- Main Container -->
-  <main class="flex-1 flex flex-col p-4 max-w-lg mx-auto w-full gap-4">
+  <main class="flex-1 flex flex-col p-4 max-w-xl mx-auto w-full gap-4">
 
     <!-- STEP 1: FILE UPLOAD SECTION -->
     <div id="setup-files-card" class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-lg space-y-4">
@@ -86,23 +86,22 @@
 
       <!-- GRID SETUP MODE CONTROLS -->
       <div id="grid-controls" class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3">
-        <label class="block text-xs text-slate-400">Target Grid Cell for Next Scan:</label>
-        
-        <!-- Target Cell Input + Next Row Button -->
-        <div class="flex gap-2">
-          <input type="text" id="target-cell" value="A1" class="uppercase text-center font-mono font-bold text-lg bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 w-20 text-blue-400 focus:outline-none focus:border-blue-500">
-          
-          <button type="button" onclick="advanceToNextRow()" class="flex-1 bg-slate-700 hover:bg-slate-600 text-blue-300 font-semibold text-xs py-2 px-3 rounded-lg border border-slate-600 transition-colors flex items-center justify-center gap-1">
-            <span>Next Row ➔</span>
-          </button>
+        <div class="flex justify-between items-center border-b border-slate-700 pb-2">
+          <label class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Target Cell:</label>
+          <div class="flex items-center gap-2">
+            <input type="text" id="target-cell" value="A1" onchange="this.value = this.value.toUpperCase(); updateMappedGridUI();" class="uppercase text-center font-mono font-bold text-md bg-slate-900 border border-blue-500 rounded px-2 py-1 w-16 text-blue-400 focus:outline-none">
+            <button type="button" onclick="advanceToNextRow()" class="bg-slate-700 hover:bg-slate-600 text-blue-300 font-semibold text-xs py-1 px-2 rounded border border-slate-600 transition-colors">
+              Next Row ➔
+            </button>
+          </div>
         </div>
-        
-        <p class="text-xs text-slate-400">
-          Scans auto-increment column numbers (A1 ➔ A2). Tap <strong>Next Row</strong> to jump letters (A ➔ B1).
-        </p>
 
-        <div id="mapped-grid-list" class="text-xs text-slate-400 max-h-32 overflow-y-auto bg-slate-900 p-2 rounded border border-slate-800 space-y-1">
-          <em>No grid cells mapped yet.</em>
+        <!-- VISUAL INTERACTIVE GRID -->
+        <div class="space-y-1">
+          <span class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Table Layout Preview (Tap cell to select)</span>
+          <div id="grid-matrix-container" class="overflow-x-auto bg-slate-900 p-3 rounded-lg border border-slate-800 max-h-64 overflow-y-auto space-y-2">
+            <!-- Dynamic Grid Matrix Renders Here -->
+          </div>
         </div>
       </div>
 
@@ -208,6 +207,7 @@
         
         setupHardwareScannerListener();
         setScanInputMethod('CAMERA');
+        updateMappedGridUI();
 
       } catch (err) {
         alert("Error parsing files: " + err.message);
@@ -362,8 +362,9 @@
           return;
         }
 
+        // Unmap existing cell if Trip ID was previously placed elsewhere
         for (let [tId, cell] of gridMap.entries()) {
-          if (cell === cellName) {
+          if (cell === cellName || tId === scannedText) {
             gridMap.delete(tId);
           }
         }
@@ -371,8 +372,9 @@
         gridMap.set(scannedText, cellName);
         playBeep(880);
 
-        updateMappedGridUI();
+        // Auto-advance to next column cell on map
         targetCellInput.value = getNextGridColumn(cellName);
+        updateMappedGridUI();
 
       } else {
         // Sorting Mode: scanned text is ASN bill barcode
@@ -408,22 +410,117 @@
       }
     }
 
-    // Update list of mapped cells in UI
-    function updateMappedGridUI() {
-      const container = document.getElementById('mapped-grid-list');
-      if (gridMap.size === 0) {
-        container.innerHTML = '<em>No grid cells mapped yet.</em>';
-        return;
+    // Target a specific cell manually via click
+    function selectTargetCell(cellName) {
+      document.getElementById('target-cell').value = cellName;
+      updateMappedGridUI();
+      if (scanInputMethod === 'HARDWARE') {
+        focusHardwareScannerInput();
       }
-      
-      const sortedEntries = Array.from(gridMap.entries()).sort((a, b) => {
-        return a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: 'base' });
-      });
+    }
+
+    // Render Visual Matrix with active trips + dynamic blank expansion cells
+    function updateMappedGridUI() {
+      const container = document.getElementById('grid-matrix-container');
+      const activeTargetCell = document.getElementById('target-cell').value.toUpperCase().trim();
+
+      // Structure grid data by Row Letter and Col Number
+      const rowMap = new Map(); // Letter -> Map(ColNumber -> TripID)
+      let maxLetter = 'A';
+
+      // Load mapped cells into structured data
+      for (let [tripId, cell] of gridMap.entries()) {
+        const match = cell.match(/^([A-Z]+)(\d+)$/);
+        if (match) {
+          const letter = match[1];
+          const col = parseInt(match[2], 10);
+          
+          if (!rowMap.has(letter)) rowMap.set(letter, new Map());
+          rowMap.get(letter).set(col, tripId);
+
+          if (letter.localeCompare(maxLetter) > 0) maxLetter = letter;
+        }
+      }
+
+      // Ensure current target cell row is included in matrix render
+      const currentMatch = activeTargetCell.match(/^([A-Z]+)(\d+)$/);
+      if (currentMatch) {
+        const curLetter = currentMatch[1];
+        if (!rowMap.has(curLetter)) rowMap.set(curLetter, new Map());
+        if (curLetter.localeCompare(maxLetter) > 0) maxLetter = curLetter;
+      } else if (!rowMap.has('A')) {
+        rowMap.set('A', new Map());
+      }
+
+      // Sort row keys alphabetically
+      const sortedRowKeys = Array.from(rowMap.keys()).sort((a, b) => 
+        a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+      );
 
       let html = '';
-      sortedEntries.forEach(([tripId, cell]) => {
-        html += `<div><strong class="text-blue-400">${cell}:</strong> Trip ID ${tripId}</div>`;
+
+      sortedRowKeys.forEach(letter => {
+        const cols = rowMap.get(letter);
+        const maxCol = cols.size > 0 ? Math.max(...Array.from(cols.keys())) : 0;
+        
+        html += `<div class="flex items-center gap-1.5 overflow-x-auto pb-1">`;
+        html += `<div class="w-6 font-bold text-xs text-slate-500 shrink-0 text-center">${letter}</div>`;
+
+        // Render filled and blank column cells for this row
+        const limitCol = maxCol + 1; // Include next blank column
+        for (let c = 1; c <= limitCol; c++) {
+          const cellName = `${letter}${c}`;
+          const tripId = cols.get(c);
+          const isSelected = (cellName === activeTargetCell);
+
+          if (tripId) {
+            // Mapped Cell
+            html += `
+              <button type="button" onclick="selectTargetCell('${cellName}')" 
+                class="shrink-0 flex flex-col items-center justify-center w-16 h-14 rounded-lg border text-left p-1 transition-all ${
+                  isSelected 
+                    ? 'bg-blue-600/30 border-blue-400 ring-2 ring-blue-400 text-white' 
+                    : 'bg-slate-800 border-slate-700 hover:border-slate-500 text-slate-200'
+                }">
+                <span class="text-[10px] font-bold ${isSelected ? 'text-blue-300' : 'text-slate-400'}">${cellName}</span>
+                <span class="text-xs font-mono font-black truncate w-full text-center">${tripId}</span>
+              </button>`;
+          } else {
+            // Blank Extension Cell
+            html += `
+              <button type="button" onclick="selectTargetCell('${cellName}')" 
+                class="shrink-0 flex flex-col items-center justify-center w-16 h-14 rounded-lg border border-dashed transition-all ${
+                  isSelected 
+                    ? 'bg-blue-600/20 border-blue-400 ring-2 ring-blue-400 text-blue-300' 
+                    : 'border-slate-700 hover:border-slate-500 text-slate-500 hover:text-slate-300'
+                }">
+                <span class="text-[10px] font-bold">${cellName}</span>
+                <span class="text-xs font-bold">+</span>
+              </button>`;
+          }
+        }
+        html += `</div>`;
       });
+
+      // Next Row Placeholder Button at the bottom
+      const nextRowLetter = getNextLetterSequence(maxLetter);
+      const nextRowFirstCell = `${nextRowLetter}1`;
+      const isNextRowSelected = (activeTargetCell === nextRowFirstCell);
+
+      html += `
+        <div class="flex items-center gap-1.5 pt-1 border-t border-slate-800">
+          <div class="w-6 font-bold text-xs text-slate-600 shrink-0 text-center">${nextRowLetter}</div>
+          <button type="button" onclick="selectTargetCell('${nextRowFirstCell}')" 
+            class="shrink-0 flex flex-col items-center justify-center w-16 h-14 rounded-lg border border-dashed transition-all ${
+              isNextRowSelected 
+                ? 'bg-blue-600/20 border-blue-400 ring-2 ring-blue-400 text-blue-300' 
+                : 'border-slate-800 hover:border-slate-600 text-slate-600 hover:text-slate-400'
+            }">
+            <span class="text-[10px] font-bold">${nextRowFirstCell}</span>
+            <span class="text-[10px] font-semibold">+ Row</span>
+          </button>
+        </div>`;
+
       container.innerHTML = html;
     }
 
@@ -443,11 +540,15 @@
       
       if (!match) {
         targetInput.value = 'A1';
-        return;
+      } else {
+        const letter = match[1];
+        targetInput.value = `${getNextLetterSequence(letter)}1`;
       }
-
-      const letter = match[1];
-      targetInput.value = `${getNextLetterSequence(letter)}1`;
+      
+      updateMappedGridUI();
+      if (scanInputMethod === 'HARDWARE') {
+        focusHardwareScannerInput();
+      }
     }
 
     // Increment letter logic (A -> B, Z -> AA, AA -> AB)
