@@ -41,10 +41,23 @@
       </button>
     </div>
 
-    <!-- STEP 2 & 3: CAMERA SCANNING INTERFACE -->
+    <!-- STEP 2 & 3: SCANNING INTERFACE -->
     <div id="scanner-section" class="hidden flex-1 flex flex-col gap-4">
+
+      <!-- Scanner Input Device Toggle -->
+      <div class="bg-slate-800 rounded-xl p-3 border border-slate-700 flex flex-col gap-2">
+        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Scanner Device Source</label>
+        <div class="grid grid-cols-2 gap-2 bg-slate-900 p-1 rounded-lg border border-slate-700">
+          <button id="input-camera-btn" onclick="setScanInputMethod('CAMERA')" class="py-2 text-xs font-bold rounded-md bg-blue-600 text-white transition-colors">
+            📷 Phone Camera
+          </button>
+          <button id="input-hardware-btn" onclick="setScanInputMethod('HARDWARE')" class="py-2 text-xs font-bold rounded-md text-slate-400 hover:text-white transition-colors">
+            🔌 Bluetooth / USB
+          </button>
+        </div>
+      </div>
       
-      <!-- Mode Toggle Header -->
+      <!-- Operation Mode Toggle Header -->
       <div class="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
         <button id="mode-grid-btn" onclick="setMode('GRID')" class="flex-1 py-2 text-sm font-bold rounded-md bg-blue-600 text-white shadow">
           1. Map Table Grid
@@ -54,12 +67,21 @@
         </button>
       </div>
 
-      <!-- Live Video Viewfinder -->
-      <div class="relative bg-black rounded-xl overflow-hidden aspect-video border-2 border-slate-700 shadow-inner">
+      <!-- Live Video Viewfinder (Shown in Camera mode) -->
+      <div id="camera-viewfinder" class="relative bg-black rounded-xl overflow-hidden aspect-video border-2 border-slate-700 shadow-inner">
         <video id="video-feed" class="w-full h-full object-cover"></video>
         <div class="absolute inset-0 border-2 border-dashed border-blue-400/50 pointer-events-none flex items-center justify-center">
           <span class="text-xs text-blue-200/70 bg-black/50 px-2 py-1 rounded">Align Barcode Here</span>
         </div>
+      </div>
+
+      <!-- Hardware Scanner Status Banner (Shown in Bluetooth/USB mode) -->
+      <div id="hardware-viewfinder" class="hidden relative bg-slate-800 rounded-xl p-6 border-2 border-emerald-500/50 text-center flex flex-col items-center justify-center gap-2 shadow-inner">
+        <span class="text-3xl">📡</span>
+        <span class="text-sm font-bold text-emerald-400">Bluetooth Scanner Ready</span>
+        <span class="text-xs text-slate-400">Scan barcodes directly using your paired hardware scanner.</span>
+        <!-- Hidden input field to catch scanner HID keyboard input -->
+        <input type="text" id="hardware-scanner-input" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" autocomplete="off" autofocus />
       </div>
 
       <!-- GRID SETUP MODE CONTROLS -->
@@ -101,9 +123,10 @@
 
   <script>
     // State management
-    let lookupMap = new Map(); // Key: ASN (stripped) -> Value: Trip ID
-    let gridMap = new Map();   // Key: Trip ID -> Value: Cell Name (e.g. A1)
-    let currentMode = 'GRID';  // 'GRID' or 'SORT'
+    let lookupMap = new Map();     // Key: ASN (stripped) -> Value: Trip ID
+    let gridMap = new Map();       // Key: Trip ID -> Value: Cell Name (e.g. A1)
+    let currentMode = 'GRID';      // 'GRID' or 'SORT'
+    let scanInputMethod = 'CAMERA';// 'CAMERA' or 'HARDWARE'
     let codeReader = null;
     let isProcessingScan = false;
 
@@ -133,9 +156,7 @@
       document.getElementById('status-badge').innerText = "Processing Files...";
 
       try {
-        // Parse CSV
         const distData = await readSpreadsheet(distFileInput);
-        // Parse XLSX
         const tripData = await readSpreadsheet(tripFileInput);
 
         // Map Trip Listing: Route Num -> Trip ID
@@ -157,7 +178,6 @@
           const refShipment = String(row['Reference Shipment Number'] || '').trim();
 
           if (distOrder && refShipment) {
-            // Strip leading 'C' or 'c'
             if (distOrder.toUpperCase().startsWith('C')) {
               distOrder = distOrder.substring(1);
             }
@@ -174,7 +194,8 @@
         document.getElementById('scanner-section').classList.remove('hidden');
         document.getElementById('status-badge').innerText = `Ready! Indexed ${matchCount} ASNs.`;
         
-        startCameraScanner();
+        setupHardwareScannerListener();
+        setScanInputMethod('CAMERA');
 
       } catch (err) {
         alert("Error parsing files: " + err.message);
@@ -202,17 +223,80 @@
       });
     }
 
-    // Step 2: Camera Setup & Barcode Loop
+    // Switch between Camera and Bluetooth Scanner input devices
+    function setScanInputMethod(method) {
+      scanInputMethod = method;
+      const cameraBtn = document.getElementById('input-camera-btn');
+      const hardwareBtn = document.getElementById('input-hardware-btn');
+      const cameraView = document.getElementById('camera-viewfinder');
+      const hardwareView = document.getElementById('hardware-viewfinder');
+
+      if (method === 'CAMERA') {
+        cameraBtn.className = "py-2 text-xs font-bold rounded-md bg-blue-600 text-white transition-colors shadow";
+        hardwareBtn.className = "py-2 text-xs font-bold rounded-md text-slate-400 hover:text-white transition-colors";
+        cameraView.classList.remove('hidden');
+        hardwareView.classList.add('hidden');
+        
+        startCameraScanner();
+      } else {
+        hardwareBtn.className = "py-2 text-xs font-bold rounded-md bg-emerald-600 text-white transition-colors shadow";
+        cameraBtn.className = "py-2 text-xs font-bold rounded-md text-slate-400 hover:text-white transition-colors";
+        hardwareView.classList.remove('hidden');
+        cameraView.classList.add('hidden');
+
+        stopCameraScanner();
+        focusHardwareScannerInput();
+      }
+    }
+
+    // Camera Scanner Controller
     function startCameraScanner() {
-      codeReader = new ZXing.BrowserMultiFormatReader();
+      if (!codeReader) {
+        codeReader = new ZXing.BrowserMultiFormatReader();
+      }
       codeReader.decodeFromVideoDevice(null, 'video-feed', (result, err) => {
         if (result && !isProcessingScan) {
           isProcessingScan = true;
           handleScannedBarcode(result.text.trim());
-          // Debounce delay to prevent double scans
           setTimeout(() => { isProcessingScan = false; }, 800);
         }
       });
+    }
+
+    function stopCameraScanner() {
+      if (codeReader) {
+        codeReader.reset();
+      }
+    }
+
+    // Bluetooth / USB Scanner Keypress Listener
+    function setupHardwareScannerListener() {
+      const hwInput = document.getElementById('hardware-scanner-input');
+      
+      hwInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const scannedText = hwInput.value.trim();
+          if (scannedText) {
+            handleScannedBarcode(scannedText);
+            hwInput.value = '';
+          }
+        }
+      });
+
+      // Keep focus on hidden input unless editing target cell
+      document.addEventListener('click', (e) => {
+        if (scanInputMethod === 'HARDWARE' && e.target.id !== 'target-cell') {
+          focusHardwareScannerInput();
+        }
+      });
+    }
+
+    function focusHardwareScannerInput() {
+      const hwInput = document.getElementById('hardware-scanner-input');
+      if (hwInput && scanInputMethod === 'HARDWARE') {
+        hwInput.focus();
+      }
     }
 
     // Switch between Mapping Grid and Sorting Bills
@@ -234,6 +318,10 @@
         sortControls.classList.remove('hidden');
         gridControls.classList.add('hidden');
       }
+
+      if (scanInputMethod === 'HARDWARE') {
+        focusHardwareScannerInput();
+      }
     }
 
     // Step 3: Handle Scanned Barcode Logic
@@ -248,16 +336,14 @@
           return;
         }
 
-        // Check if this cellName was previously assigned to another trip ID, remove old binding if needed
         for (let [tId, cell] of gridMap.entries()) {
           if (cell === cellName) {
             gridMap.delete(tId);
           }
         }
 
-        // Set new Trip ID -> Cell Mapping
         gridMap.set(scannedText, cellName);
-        playBeep(880); // High beep success
+        playBeep(880);
 
         updateMappedGridUI();
         targetCellInput.value = getNextGridColumn(cellName);
@@ -280,18 +366,18 @@
             displayCell.innerText = cell;
             displayCell.className = "text-7xl font-black text-emerald-400 tracking-tight py-2";
             displayMeta.innerText = `ASN: ${asn} ➔ Trip ID: ${tripId}`;
-            playBeep(1046); // High success pitch
+            playBeep(1046);
           } else {
             displayCell.innerText = "NO CELL";
             displayCell.className = "text-5xl font-black text-amber-400 tracking-tight py-2";
             displayMeta.innerText = `Trip ID ${tripId} not mapped on table grid!`;
-            playBeep(300, 'sawtooth'); // Error pitch
+            playBeep(300, 'sawtooth');
           }
         } else {
           displayCell.innerText = "NOT FOUND";
           displayCell.className = "text-5xl font-black text-rose-500 tracking-tight py-2";
           displayMeta.innerText = `ASN ${asn} not found in Distribution Orders`;
-          playBeep(200, 'square'); // Low error pitch
+          playBeep(200, 'square');
         }
       }
     }
@@ -304,7 +390,6 @@
         return;
       }
       
-      // Sort entries alphabetically by Cell Name (A1, A2, B1...) for visual clarity
       const sortedEntries = Array.from(gridMap.entries()).sort((a, b) => {
         return a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: 'base' });
       });
