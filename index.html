@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Dispatch Grid Sorter</title>
+  <!-- Tailwind CSS for UI -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- SheetJS to read XLSX and CSV files -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- ZXing Barcode Scanner Library -->
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex flex-col font-sans">
+
+  <!-- Header -->
+  <header class="bg-slate-800 border-b border-slate-700 p-4 text-center">
+    <h1 class="text-xl font-bold tracking-wide text-blue-400">Dispatch Grid Sorter</h1>
+    <p id="status-badge" class="text-xs text-slate-400 mt-1">Step 1: Upload Data Files</p>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 flex flex-col p-4 max-w-lg mx-auto w-full gap-4">
+
+    <!-- STEP 1: FILE UPLOAD SECTION -->
+    <div id="setup-files-card" class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-lg space-y-4">
+      <h2 class="text-md font-semibold text-slate-200 border-b border-slate-700 pb-2">1. Load Dispatch Files</h2>
+      
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Distribution Orders (.csv)</label>
+        <input type="file" id="dist-file" accept=".csv" class="w-full text-sm text-slate-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:font-semibold hover:file:bg-blue-500 cursor-pointer bg-slate-900 rounded-lg border border-slate-700">
+      </div>
+
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Trip Listing (.xlsx / .csv)</label>
+        <input type="file" id="trip-file" accept=".xlsx, .xls, .csv" class="w-full text-sm text-slate-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:font-semibold hover:file:bg-blue-500 cursor-pointer bg-slate-900 rounded-lg border border-slate-700">
+      </div>
+
+      <button id="process-files-btn" onclick="processFiles()" class="w-full py-3 bg-emerald-600 text-white font-bold rounded-lg shadow hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed">
+        Build Lookup Index
+      </button>
+    </div>
+
+    <!-- STEP 2 & 3: CAMERA SCANNING INTERFACE -->
+    <div id="scanner-section" class="hidden flex-1 flex flex-col gap-4">
+      
+      <!-- Mode Toggle Header -->
+      <div class="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
+        <button id="mode-grid-btn" onclick="setMode('GRID')" class="flex-1 py-2 text-sm font-bold rounded-md bg-blue-600 text-white shadow">
+          1. Map Table Grid
+        </button>
+        <button id="mode-sort-btn" onclick="setMode('SORT')" class="flex-1 py-2 text-sm font-bold rounded-md text-slate-400 hover:text-white">
+          2. Scan & Sort Bills
+        </button>
+      </div>
+
+      <!-- Live Video Viewfinder -->
+      <div class="relative bg-black rounded-xl overflow-hidden aspect-video border-2 border-slate-700 shadow-inner">
+        <video id="video-feed" class="w-full h-full object-cover"></video>
+        <div class="absolute inset-0 border-2 border-dashed border-blue-400/50 pointer-events-none flex items-center justify-center">
+          <span class="text-xs text-blue-200/70 bg-black/50 px-2 py-1 rounded">Align Barcode Here</span>
+        </div>
+      </div>
+
+      <!-- GRID SETUP MODE CONTROLS -->
+      <div id="grid-controls" class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3">
+        <label class="block text-xs text-slate-400">Target Grid Cell for Next Scan:</label>
+        
+        <!-- Target Cell Input + Next Row Button -->
+        <div class="flex gap-2">
+          <input type="text" id="target-cell" value="A1" class="uppercase text-center font-mono font-bold text-lg bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 w-20 text-blue-400 focus:outline-none focus:border-blue-500">
+          
+          <button type="button" onclick="advanceToNextRow()" class="flex-1 bg-slate-700 hover:bg-slate-600 text-blue-300 font-semibold text-xs py-2 px-3 rounded-lg border border-slate-600 transition-colors flex items-center justify-center gap-1">
+            <span>Next Row ➔</span>
+          </button>
+        </div>
+        
+        <p class="text-xs text-slate-400">
+          Scans auto-increment column numbers (A1 ➔ A2). Tap <strong>Next Row</strong> to jump letters (A ➔ B1).
+        </p>
+
+        <div id="mapped-grid-list" class="text-xs text-slate-400 max-h-32 overflow-y-auto bg-slate-900 p-2 rounded border border-slate-800 space-y-1">
+          <em>No grid cells mapped yet.</em>
+        </div>
+      </div>
+
+      <!-- SORTING DISPLAY RESULT (BIG TEXT OUTPUT) -->
+      <div id="sort-controls" class="hidden flex-1 flex flex-col justify-center items-center bg-slate-800 border border-slate-700 rounded-xl p-6 text-center space-y-2">
+        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Destination Cell</span>
+        <div id="result-cell-display" class="text-7xl font-black text-emerald-400 tracking-tight py-2">
+          --
+        </div>
+        <div id="result-meta-display" class="text-sm text-slate-300 font-mono">
+          Scan a bill cover sheet ASN
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    // State management
+    let lookupMap = new Map(); // Key: ASN (stripped) -> Value: Trip ID
+    let gridMap = new Map();   // Key: Trip ID -> Value: Cell Name (e.g. A1)
+    let currentMode = 'GRID';  // 'GRID' or 'SORT'
+    let codeReader = null;
+    let isProcessingScan = false;
+
+    // Audio Feedback
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playBeep(freq = 880, type = 'sine') {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.15);
+    }
+
+    // Step 1: Parse Files & Build Lookup Map
+    async function processFiles() {
+      const distFileInput = document.getElementById('dist-file').files[0];
+      const tripFileInput = document.getElementById('trip-file').files[0];
+
+      if (!distFileInput || !tripFileInput) {
+        alert("Please select both Distribution Orders.csv and Trip Listing.xlsx files.");
+        return;
+      }
+
+      document.getElementById('status-badge').innerText = "Processing Files...";
+
+      try {
+        // Parse CSV
+        const distData = await readSpreadsheet(distFileInput);
+        // Parse XLSX
+        const tripData = await readSpreadsheet(tripFileInput);
+
+        // Map Trip Listing: Route Num -> Trip ID
+        const routeToTripMap = new Map();
+        tripData.forEach(row => {
+          const routeNum = String(row['Route Num'] || row['Route'] || '').trim();
+          const tripId = String(row['Trip ID'] || row['Trip'] || '').trim();
+          if (routeNum && tripId) {
+            routeToTripMap.set(routeNum, tripId);
+          }
+        });
+
+        // Map Distribution Orders: Stripped ASN -> Trip ID
+        lookupMap.clear();
+        let matchCount = 0;
+
+        distData.forEach(row => {
+          let distOrder = String(row['Distribution Order'] || '').trim();
+          const refShipment = String(row['Reference Shipment Number'] || '').trim();
+
+          if (distOrder && refShipment) {
+            // Strip leading 'C' or 'c'
+            if (distOrder.toUpperCase().startsWith('C')) {
+              distOrder = distOrder.substring(1);
+            }
+
+            if (routeToTripMap.has(refShipment)) {
+              const tripId = routeToTripMap.get(refShipment);
+              lookupMap.set(distOrder, tripId);
+              matchCount++;
+            }
+          }
+        });
+
+        document.getElementById('setup-files-card').classList.add('hidden');
+        document.getElementById('scanner-section').classList.remove('hidden');
+        document.getElementById('status-badge').innerText = `Ready! Indexed ${matchCount} ASNs.`;
+        
+        startCameraScanner();
+
+      } catch (err) {
+        alert("Error parsing files: " + err.message);
+        document.getElementById('status-badge').innerText = "Error loading files.";
+      }
+    }
+
+    // SheetJS file reader helper
+    function readSpreadsheet(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
+            resolve(json);
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    // Step 2: Camera Setup & Barcode Loop
+    function startCameraScanner() {
+      codeReader = new ZXing.BrowserMultiFormatReader();
+      codeReader.decodeFromVideoDevice(null, 'video-feed', (result, err) => {
+        if (result && !isProcessingScan) {
+          isProcessingScan = true;
+          handleScannedBarcode(result.text.trim());
+          // Debounce delay to prevent double scans
+          setTimeout(() => { isProcessingScan = false; }, 800);
+        }
+      });
+    }
+
+    // Switch between Mapping Grid and Sorting Bills
+    function setMode(mode) {
+      currentMode = mode;
+      const gridBtn = document.getElementById('mode-grid-btn');
+      const sortBtn = document.getElementById('mode-sort-btn');
+      const gridControls = document.getElementById('grid-controls');
+      const sortControls = document.getElementById('sort-controls');
+
+      if (mode === 'GRID') {
+        gridBtn.className = "flex-1 py-2 text-sm font-bold rounded-md bg-blue-600 text-white shadow";
+        sortBtn.className = "flex-1 py-2 text-sm font-bold rounded-md text-slate-400 hover:text-white";
+        gridControls.classList.remove('hidden');
+        sortControls.classList.add('hidden');
+      } else {
+        sortBtn.className = "flex-1 py-2 text-sm font-bold rounded-md bg-emerald-600 text-white shadow";
+        gridBtn.className = "flex-1 py-2 text-sm font-bold rounded-md text-slate-400 hover:text-white";
+        sortControls.classList.remove('hidden');
+        gridControls.classList.add('hidden');
+      }
+    }
+
+    // Step 3: Handle Scanned Barcode Logic
+    function handleScannedBarcode(scannedText) {
+      if (currentMode === 'GRID') {
+        // Mapping Mode: scanned text is Trip ID on paper sheet
+        const targetCellInput = document.getElementById('target-cell');
+        const cellName = targetCellInput.value.toUpperCase().trim();
+
+        if (!cellName) {
+          alert("Please specify a grid cell (e.g. A1).");
+          return;
+        }
+
+        // Check if this cellName was previously assigned to another trip ID, remove old binding if needed
+        for (let [tId, cell] of gridMap.entries()) {
+          if (cell === cellName) {
+            gridMap.delete(tId);
+          }
+        }
+
+        // Set new Trip ID -> Cell Mapping
+        gridMap.set(scannedText, cellName);
+        playBeep(880); // High beep success
+
+        updateMappedGridUI();
+        targetCellInput.value = getNextGridColumn(cellName);
+
+      } else {
+        // Sorting Mode: scanned text is ASN bill barcode
+        let asn = scannedText;
+        if (asn.toUpperCase().startsWith('C')) {
+          asn = asn.substring(1);
+        }
+
+        const displayCell = document.getElementById('result-cell-display');
+        const displayMeta = document.getElementById('result-meta-display');
+
+        if (lookupMap.has(asn)) {
+          const tripId = lookupMap.get(asn);
+          
+          if (gridMap.has(tripId)) {
+            const cell = gridMap.get(tripId);
+            displayCell.innerText = cell;
+            displayCell.className = "text-7xl font-black text-emerald-400 tracking-tight py-2";
+            displayMeta.innerText = `ASN: ${asn} ➔ Trip ID: ${tripId}`;
+            playBeep(1046); // High success pitch
+          } else {
+            displayCell.innerText = "NO CELL";
+            displayCell.className = "text-5xl font-black text-amber-400 tracking-tight py-2";
+            displayMeta.innerText = `Trip ID ${tripId} not mapped on table grid!`;
+            playBeep(300, 'sawtooth'); // Error pitch
+          }
+        } else {
+          displayCell.innerText = "NOT FOUND";
+          displayCell.className = "text-5xl font-black text-rose-500 tracking-tight py-2";
+          displayMeta.innerText = `ASN ${asn} not found in Distribution Orders`;
+          playBeep(200, 'square'); // Low error pitch
+        }
+      }
+    }
+
+    // Update list of mapped cells in UI
+    function updateMappedGridUI() {
+      const container = document.getElementById('mapped-grid-list');
+      if (gridMap.size === 0) {
+        container.innerHTML = '<em>No grid cells mapped yet.</em>';
+        return;
+      }
+      
+      // Sort entries alphabetically by Cell Name (A1, A2, B1...) for visual clarity
+      const sortedEntries = Array.from(gridMap.entries()).sort((a, b) => {
+        return a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: 'base' });
+      });
+
+      let html = '';
+      sortedEntries.forEach(([tripId, cell]) => {
+        html += `<div><strong class="text-blue-400">${cell}:</strong> Trip ID ${tripId}</div>`;
+      });
+      container.innerHTML = html;
+    }
+
+    // Auto-increment column number (A1 -> A2 -> A3)
+    function getNextGridColumn(currentCell) {
+      const match = currentCell.match(/^([A-Z]+)(\d+)$/);
+      if (!match) return currentCell;
+      const letter = match[1];
+      const number = parseInt(match[2], 10);
+      return `${letter}${number + 1}`;
+    }
+
+    // Advance to next row letter (A4 -> B1, B8 -> C1, Z5 -> AA1)
+    function advanceToNextRow() {
+      const targetInput = document.getElementById('target-cell');
+      const match = targetInput.value.trim().toUpperCase().match(/^([A-Z]+)(\d+)$/);
+      
+      if (!match) {
+        targetInput.value = 'A1';
+        return;
+      }
+
+      const letter = match[1];
+      targetInput.value = `${getNextLetterSequence(letter)}1`;
+    }
+
+    // Increment letter logic (A -> B, Z -> AA, AA -> AB)
+    function getNextLetterSequence(str) {
+      let i = str.length - 1;
+      let chars = str.split('');
+
+      while (i >= 0) {
+        if (chars[i] === 'Z') {
+          chars[i] = 'A';
+          i--;
+        } else {
+          chars[i] = String.fromCharCode(chars[i].charCodeAt(0) + 1);
+          return chars.join('');
+        }
+      }
+      return 'A' + chars.join('');
+    }
+  </script>
+</body>
+</html>
