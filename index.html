@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0F1B26">
+<title>Trip Bundle Sorter</title>
+<style>
+:root{
+  --ink:#0F1B26; --paper:#fff; --bg:#DCE2E8; --line:#B7C1CB; --mute:#5B6B7A;
+  --blue:#1F4FE0; --sig:#FFD21F; --red:#D7263D; --green:#12805C; --amber:#E08A00;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.35 -apple-system,BlinkMacSystemFont,"Helvetica Neue",system-ui,sans-serif;
+  overscroll-behavior:none;touch-action:manipulation;-webkit-user-select:none;user-select:none;
+  -webkit-text-size-adjust:100%}
+button{font:inherit;color:inherit;border:0;background:none;padding:0;cursor:pointer}
+button:focus-visible,label:focus-within{outline:3px solid var(--blue);outline-offset:2px}
+
+/* ---------- Upload screen ---------- */
+#screenUpload{min-height:100dvh;padding:calc(env(safe-area-inset-top) + 28px) 18px calc(env(safe-area-inset-bottom) + 24px)}
+#screenUpload h1{font-size:30px;line-height:1.05;margin:0 0 6px;font-weight:850;letter-spacing:-.02em}
+#screenUpload p.lead{margin:0 0 22px;color:var(--mute)}
+.drop{display:block;background:var(--paper);border:2px solid var(--ink);border-radius:6px;padding:14px;margin-bottom:14px}
+.drop.ok{border-color:var(--green)}
+.drop.err{border-color:var(--red)}
+.drop .name{font-weight:750;font-size:18px}
+.drop .hint{color:var(--mute);font-size:14px;margin:2px 0 10px}
+.drop .pick{display:inline-block;background:var(--ink);color:#fff;padding:11px 16px;border-radius:4px;font-weight:700}
+.drop input{position:absolute;opacity:0;width:1px;height:1px}
+.drop .status{margin-top:10px;font-size:14px;min-height:20px}
+.drop.ok .status{color:var(--green);font-weight:650}
+.drop.err .status{color:var(--red);font-weight:650}
+#procMsg{color:var(--mute);font-size:14px;min-height:20px}
+
+/* ---------- Scan screen ---------- */
+#screenScan{display:flex;flex-direction:column;height:100dvh}
+.bar{flex:none;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:space-between;
+  padding:calc(env(safe-area-inset-top) + 8px) 14px 8px}
+.bar .count{font-size:17px;font-weight:600}
+.bar .count b{font-size:24px;font-weight:850;font-variant-numeric:tabular-nums}
+.bar .menu{border:1.5px solid #fff;border-radius:4px;padding:6px 12px;font-weight:650;font-size:15px}
+
+.cam{flex:none;position:relative;width:100%;aspect-ratio:16/9;max-height:30dvh;background:#000;overflow:hidden}
+.cam video{width:100%;height:100%;object-fit:cover;display:block}
+.reticle{position:absolute;inset:14% 22%;border:2px solid rgba(255,255,255,.85);border-radius:6px;pointer-events:none;
+  box-shadow:0 0 0 999px rgba(0,0,0,.25)}
+.camOverlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  background:rgba(15,27,38,.88);color:#fff;text-align:center;padding:12px}
+.camOverlay .go{background:var(--sig);color:var(--ink);padding:12px 22px;border-radius:4px;font-weight:800;font-size:18px}
+.camOverlay .msg{font-size:14px;opacity:.9;max-width:300px}
+.camTools{position:absolute;right:8px;bottom:8px;display:flex;gap:6px}
+.camTools button{background:rgba(15,27,38,.78);color:#fff;border-radius:4px;padding:6px 12px;font-size:14px;font-weight:650}
+
+.tabs{flex:none;display:grid;grid-template-columns:1fr 1fr;background:var(--ink)}
+.tabs button{padding:12px 6px;font-weight:750;color:#9fb0c0;border-top:3px solid transparent}
+.tabs button.on{color:#fff;border-top-color:var(--sig);background:#1b2c3b}
+
+.panel{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px calc(env(safe-area-inset-bottom) + 20px)}
+.hint{font-size:15px;margin:0 0 10px}
+.hint b{font-weight:800}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.btn{background:var(--ink);color:#fff;border-radius:4px;padding:12px 16px;font-weight:750}
+.btn.alt{background:var(--paper);color:var(--ink);border:2px solid var(--ink);padding:10px 14px}
+.btn.warn{background:var(--red)}
+
+/* Result */
+.result{border-radius:6px;padding:14px;margin-bottom:14px;text-align:center;background:var(--paper);border:2px dashed var(--line);color:var(--mute)}
+.result.ok{background:var(--sig);border:2px solid var(--ink);color:var(--ink)}
+.result.bad{background:var(--red);border:2px solid var(--red);color:#fff}
+.result.warn{background:var(--amber);border:2px solid var(--amber);color:#fff}
+.result .big{font-weight:900;line-height:.95;letter-spacing:-.04em;font-size:34vw;font-variant-numeric:tabular-nums}
+.result .big.sm{font-size:17vw}
+.result .title{font-size:30px;font-weight:850;line-height:1.05}
+.result .sub{font-size:16px;font-weight:650;margin-top:6px}
+.result .sub2{font-size:14px;margin-top:2px;opacity:.85}
+.result .tag{display:inline-block;margin-top:8px;padding:3px 10px;border-radius:99px;background:var(--ink);color:#fff;font-size:13px;font-weight:700}
+.prog{font-size:14px;color:var(--mute);margin:-6px 0 12px;text-align:center}
+
+/* Grid */
+.gridWrap{overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+.row{display:flex;gap:6px;margin-bottom:6px;width:max-content;min-width:100%}
+.rl{flex:none;width:34px;border-radius:4px;background:var(--ink);color:#fff;font-weight:850;font-size:17px;
+  display:flex;align-items:center;justify-content:center;position:sticky;left:0;z-index:2}
+.rl.on{background:var(--blue)}
+.cell{flex:none;width:84px;height:68px;border-radius:5px;background:var(--paper);border:2px solid var(--ink);
+  display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;padding:4px 6px;text-align:left;position:relative}
+.cell .lab{font-size:12px;font-weight:800;color:var(--mute)}
+.cell .id{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.cell .cnt{font-size:12px;color:var(--mute);font-weight:650}
+.cell.empty{border-style:dashed;border-color:var(--line);background:transparent}
+.cell.zero .cnt{color:var(--red)}
+.cell.sel{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue)}
+.cell.next{border-style:dashed;border-color:var(--blue);background:#E8EEFF;animation:pulse 1.4s ease-in-out infinite}
+.cell.next .id{color:var(--blue)}
+.cell.done{background:#CFEBDD;border-color:var(--green)}
+.cell.done .cnt{color:var(--green)}
+.cell.target{background:var(--sig);box-shadow:0 0 0 4px var(--ink);z-index:1}
+.cell.target .lab,.cell.target .cnt{color:var(--ink)}
+@keyframes pulse{50%{background:#fff}}
+@media (prefers-reduced-motion:reduce){.cell.next{animation:none}}
+
+.toast{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 14px);z-index:30;background:var(--ink);color:#fff;
+  padding:12px 14px;border-radius:6px;font-weight:650;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,.35)}
+.toast.bad{background:var(--red)}
+
+/* Menu sheet */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;display:flex;align-items:flex-end}
+.sheet{background:var(--paper);width:100%;border-radius:12px 12px 0 0;padding:14px 14px calc(env(safe-area-inset-bottom) + 14px);display:grid;gap:8px}
+.sheet .btn{width:100%;text-align:center}
+</style>
+</head>
+<body>
+
+<!-- ============ Upload ============ -->
+<section id="screenUpload">
+  <h1>Trip bundle sorter</h1>
+  <p class="lead">Load both files to match each ASN to its trip.</p>
+
+  <label class="drop" id="dropPO">
+    <div class="name">PO Listing</div>
+    <div class="hint">Usually .xlsx. Needs PO Num, Vendor and ASN columns.</div>
+    <span class="pick">Choose file</span>
+    <input type="file" id="filePO" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+    <div class="status" id="statPO">No file chosen</div>
+  </label>
+
+  <label class="drop" id="dropOS">
+    <div class="name">OrderSearch</div>
+    <div class="hint">Usually .csv. Needs OrderType, OrderCode, TripID and StopNum columns.</div>
+    <span class="pick">Choose file</span>
+    <input type="file" id="fileOS" accept=".csv,.xlsx,.xls,text/csv">
+    <div class="status" id="statOS">No file chosen</div>
+  </label>
+
+  <div id="procMsg"></div>
+</section>
+
+<!-- ============ Scan ============ -->
+<section id="screenScan" hidden>
+  <header class="bar">
+    <div class="count" id="matchCount"></div>
+    <button class="menu" id="menuBtn">Menu</button>
+  </header>
+
+  <div class="cam" id="cam">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="reticle"></div>
+    <div class="camOverlay" id="camOverlay">
+      <button class="go" id="camGo">Start camera</button>
+      <div class="msg" id="camMsg"></div>
+    </div>
+    <div class="camTools">
+      <button id="typeBtn">Type</button>
+      <button id="pauseBtn">Pause</button>
+    </div>
+  </div>
+
+  <nav class="tabs">
+    <button id="tabGrid" class="on">Lay out grid</button>
+    <button id="tabSort">Scan bills</button>
+  </nav>
+
+  <main class="panel" id="panel">
+    <div id="gridTools">
+      <p class="hint" id="gridHint"></p>
+      <div class="tools">
+        <button class="btn" id="newRow">New row</button>
+        <button class="btn alt" id="clearCell" hidden>Clear cell</button>
+        <button class="btn alt" id="cancelSel" hidden>Cancel</button>
+      </div>
+    </div>
+    <div id="sortTop" hidden>
+      <div class="result" id="result"></div>
+      <div class="prog" id="prog"></div>
+    </div>
+    <div class="gridWrap"><div id="grid"></div></div>
+  </main>
+</section>
+
+<div class="toast" id="toast" hidden></div>
+<div class="scrim" id="scrim" hidden>
+  <div class="sheet">
+    <button class="btn alt" id="mReset">Reset sorted bills</button>
+    <button class="btn alt" id="mClear">Clear grid</button>
+    <button class="btn alt" id="mExport">Download asns.json</button>
+    <button class="btn warn" id="mNew">Load new files</button>
+    <button class="btn" id="mClose">Close</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const STORE = 'tripsort.v1';
+
+/* ---------- Camera / battery settings ---------- */
+const CAM_WIDTH = 960, CAM_HEIGHT = 540;   // modest resolution
+const CAM_FPS = 15;                        // modest frame rate
+const SCAN_MS = 250;                       // decode at most ~4x per second
+const IDLE_MS = 120000;                    // auto-pause camera after 2 min without a scan or tap
+
+/* ---------- State ---------- */
+let S = { asns: [], stats: { total: 0, matched: 0 }, rows: [[]], active: 0, sorted: [], mode: 'grid' };
+let sel = null;          // {r,c} cell being replaced
+let hits = [];           // cells highlighted by last bill scan
+let asnIdx = new Map();  // ASN -> entries
+let tripAsns = new Map();// TripID -> Set of ASN
+window.asns = S.asns;    // handy for debugging
+
+function save(){ try{ localStorage.setItem(STORE, JSON.stringify(S)); }catch(e){} }
+function load(){
+  try{
+    const raw = localStorage.getItem(STORE); if(!raw) return false;
+    const d = JSON.parse(raw);
+    if(!d || !Array.isArray(d.asns) || !d.asns.length) return false;
+    S = Object.assign(S, d);
+    if(!S.rows || !S.rows.length) S.rows = [[]];
+    if(S.active >= S.rows.length) S.active = S.rows.length - 1;
+    window.asns = S.asns;
+    return true;
+  }catch(e){ return false; }
+}
+
+/* ---------- Helpers ---------- */
+const clean = v => v == null ? '' : String(v).trim();
+function rowName(n){ let s='', x=n+1; while(x>0){ const m=(x-1)%26; s=String.fromCharCode(65+m)+s; x=Math.floor((x-1)/26);} return s; }
+const cellName = (r,c) => rowName(r) + (c+1);
+function findTrip(id){
+  for(let r=0;r<S.rows.length;r++){ const c=S.rows[r].indexOf(id); if(c>=0) return {r,c}; }
+  return null;
+}
+function toast(msg, bad){
+  const t=$('toast'); t.textContent=msg; t.className='toast'+(bad?' bad':''); t.hidden=false;
+  clearTimeout(toast.t); toast.t=setTimeout(()=>t.hidden=true, 2600);
+}
+let ac;
+function beep(ok){
+  try{
+    ac = ac || new (window.AudioContext||window.webkitAudioContext)();
+    if(ac.state==='suspended') ac.resume();
+    const o=ac.createOscillator(), g=ac.createGain();
+    o.connect(g); g.connect(ac.destination);
+    o.frequency.value = ok ? 880 : 220; g.gain.value = .08;
+    o.start(); o.stop(ac.currentTime + (ok ? .08 : .25));
+  }catch(e){}
+}
+document.addEventListener('pointerdown', () => { try{ ac = ac || new (window.AudioContext||window.webkitAudioContext)(); if(ac.state==='suspended') ac.resume(); }catch(e){} }, {once:true});
+
+/* ---------- File parsing ---------- */
+async function readTable(file, must){
+  if(typeof XLSX === 'undefined') throw new Error('Spreadsheet library did not load. Check your connection and reload.');
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, {type:'array'});
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const aoa = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:'', blankrows:false});
+  let h = -1;
+  for(let i=0;i<Math.min(aoa.length,15);i++){
+    const cells = aoa[i].map(x => clean(x).toLowerCase());
+    if(must.every(m => cells.includes(m))){ h=i; break; }
+  }
+  if(h<0) throw new Error('Missing columns: ' + must.join(', '));
+  const heads = aoa[h].map(x => clean(x).toLowerCase());
+  return aoa.slice(h+1).map(r => { const o={}; heads.forEach((k,i)=>{ if(k) o[k]=clean(r[i]); }); return o; });
+}
+
+let poRows = null, osRows = null;
+
+function setDrop(which, state, msg){
+  const d = $(which==='po'?'dropPO':'dropOS');
+  d.className = 'drop' + (state ? ' '+state : '');
+  $(which==='po'?'statPO':'statOS').textContent = msg;
+}
+
+async function onFile(which, file){
+  if(!file) return;
+  setDrop(which, '', 'Reading ' + file.name + '…');
+  try{
+    if(which==='po'){
+      poRows = await readTable(file, ['po num','vendor','asn']);
+      setDrop('po','ok', file.name + ' · ' + poRows.length + ' rows');
+    }else{
+      osRows = await readTable(file, ['ordertype','ordercode','tripid','stopnum']);
+      setDrop('os','ok', file.name + ' · ' + osRows.length + ' rows');
+    }
+  }catch(e){
+    if(which==='po') poRows = null; else osRows = null;
+    setDrop(which,'err', e.message);
+    return;
+  }
+  if(poRows && osRows) buildData();
+}
+
+function buildData(){
+  // OrderSearch: only Stop Order rows
+  const stopMap = new Map();
+  for(const r of osRows){
+    if(r.ordertype.toLowerCase() !== 'stop order') continue;
+    if(r.ordercode && !stopMap.has(r.ordercode)) stopMap.set(r.ordercode, {TripID:r.tripid, StopNum:r.stopnum});
+  }
+  // PO Listing: every row with an ASN
+  const asns = [];
+  for(const r of poRows){
+    if(!r.asn) continue;
+    const o = {'PO Num': r['po num'], 'Vendor': r.vendor, 'ASN': r.asn};
+    const m = stopMap.get(o['PO Num']);
+    if(m && m.TripID){ o.TripID = m.TripID; o.StopNum = m.StopNum; }
+    asns.push(o);
+  }
+  const total = new Set(asns.map(a => a['PO Num'])).size;
+  const matched = new Set(asns.filter(a => a.TripID).map(a => a['PO Num'])).size;
+  S = { asns, stats:{total, matched}, rows:[[]], active:0, sorted:[], mode:'grid' };
+  window.asns = S.asns;
+  sel = null; hits = [];
+  save();
+  $('procMsg').textContent = '';
+  enterScan();
+}
+
+$('filePO').addEventListener('change', e => onFile('po', e.target.files[0]));
+$('fileOS').addEventListener('change', e => onFile('os', e.target.files[0]));
+
+/* ---------- Indexes ---------- */
+function buildIndex(){
+  asnIdx = new Map(); tripAsns = new Map();
+  const add = (k,e) => { if(!asnIdx.has(k)) asnIdx.set(k,[]); asnIdx.get(k).push(e); };
+  for(const e of S.asns){
+    const a = e.ASN.toUpperCase().replace(/\s+/g,'');
+    add(a,e);
+    const z = a.replace(/^0+/,''); if(z && z!==a) add(z,e);
+    if(e.TripID){ if(!tripAsns.has(e.TripID)) tripAsns.set(e.TripID,new Set()); tripAsns.get(e.TripID).add(e.ASN); }
+  }
+}
+function lookupAsn(text){
+  const t = text.toUpperCase().replace(/\s+/g,'');
+  let list = asnIdx.get(t) || asnIdx.get(t.replace(/^0+/,'')) || [];
+  if(!list.length) list = S.asns.filter(e => e.ASN.length>=5 && t.includes(e.ASN.toUpperCase()));
+  return [...new Set(list)];
+}
+
+/* ---------- Scan screen ---------- */
+function enterScan(){
+  buildIndex();
+  $('screenUpload').hidden = true;
+  $('screenScan').hidden = false;
+  renderCount();
+  setMode(S.mode || 'grid');
+  showResult(null);
+}
+function renderCount(){
+  $('matchCount').innerHTML = '<b>' + S.stats.matched + '</b> of ' + S.stats.total + ' orders matched';
+}
+function setMode(m){
+  S.mode = m; hits = []; sel = null;
+  $('tabGrid').classList.toggle('on', m==='grid');
+  $('tabSort').classList.toggle('on', m==='sort');
+  $('gridTools').hidden = m!=='grid';
+  $('sortTop').hidden = m!=='sort';
+  renderGrid(); renderTools(); renderProg(); save();
+}
+$('tabGrid').onclick = () => setMode('grid');
+$('tabSort').onclick = () => setMode('sort');
+
+function renderTools(){
+  const row = S.rows[S.active];
+  $('gridHint').innerHTML = sel
+    ? 'Replacing <b>' + cellName(sel.r, sel.c) + '</b>. Scan the new trip barcode.'
+    : 'Scan trip sheets into <b>' + cellName(S.active, row.length) + '</b>. Tap a cell to replace it.';
+  $('clearCell').hidden = !sel;
+  $('cancelSel').hidden = !sel;
+}
+function renderProg(){
+  const matchedAsns = new Set(S.asns.filter(a => a.TripID).map(a => a.ASN)).size;
+  $('prog').textContent = 'Sorted ' + S.sorted.length + ' of ' + matchedAsns + ' bills';
+}
+
+function cellHtml(r,c,id){
+  const lab = cellName(r,c), sortMode = S.mode==='sort';
+  if(id == null) return '<button class="cell empty'+(sel&&sel.r===r&&sel.c===c?' sel':'')+'" data-r="'+r+'" data-c="'+c+'"><span class="lab">'+lab+'</span></button>';
+  const set = tripAsns.get(id), total = set ? set.size : 0;
+  let done = 0; if(set) for(const a of set) if(S.sorted.includes(a)) done++;
+  const cls = ['cell'];
+  if(sel && sel.r===r && sel.c===c) cls.push('sel');
+  if(hits.some(h => h.r===r && h.c===c)) cls.push('target');
+  if(total===0) cls.push('zero');
+  if(sortMode && total>0 && done===total) cls.push('done');
+  const cnt = sortMode ? (total ? done+'/'+total : 'no bills') : (total ? total+(total===1?' bill':' bills') : 'no bills');
+  return '<button class="cell '+cls.slice(1).join(' ')+'" data-r="'+r+'" data-c="'+c+'"><span class="lab">'+lab+'</span><span class="id">'+id+'</span><span class="cnt">'+cnt+'</span></button>';
+}
+function renderGrid(){
+  const sortMode = S.mode==='sort';
+  let h = '';
+  S.rows.forEach((row,r) => {
+    h += '<div class="row"><button class="rl'+(!sortMode && r===S.active?' on':'')+'" data-row="'+r+'">'+rowName(r)+'</button>';
+    row.forEach((id,c) => { h += cellHtml(r,c,id); });
+    if(!sortMode && r===S.active) h += '<div class="cell next"><span class="lab">'+cellName(r,row.length)+'</span><span class="id">Scan</span></div>';
+    h += '</div>';
+  });
+  $('grid').innerHTML = h;
+}
+$('grid').addEventListener('click', e => {
+  if(S.mode!=='grid') return;
+  const rl = e.target.closest('.rl');
+  if(rl){ S.active = +rl.dataset.row; sel = null; renderGrid(); renderTools(); save(); return; }
+  const cell = e.target.closest('.cell');
+  if(!cell) return;
+  if(cell.dataset.r === undefined){ sel = null; }
+  else{
+    const r = +cell.dataset.r, c = +cell.dataset.c;
+    sel = (sel && sel.r===r && sel.c===c) ? null : {r,c};
+  }
+  renderGrid(); renderTools();
+});
+$('newRow').onclick = () => {
+  if(S.rows[S.active].length===0 && S.active===S.rows.length-1){ toast('This row is still empty.'); return; }
+  S.rows.push([]); S.active = S.rows.length-1; sel = null;
+  renderGrid(); renderTools(); save();
+  $('grid').lastElementChild && $('grid').lastElementChild.scrollIntoView({block:'nearest'});
+};
+$('cancelSel').onclick = () => { sel = null; renderGrid(); renderTools(); };
+$('clearCell').onclick = () => {
+  if(!sel) return;
+  const row = S.rows[sel.r];
+  if(sel.c === row.length-1) row.pop(); else row[sel.c] = null;
+  while(row.length && row[row.length-1]==null) row.pop();
+  sel = null; renderGrid(); renderTools(); save();
+};
+
+/* ---------- Scan handling ---------- */
+let lastText = '', lastTime = 0;
+function onScan(text, manual){
+  const t = clean(text); if(!t) return;
+  const now = Date.now();
+  if(!manual && t===lastText && now-lastTime < 2000) return;
+  lastText = t; lastTime = now;
+  resetIdle();
+  if(S.mode==='grid') gridScan(t); else sortScan(t);
+}
+
+function gridScan(id){
+  const loc = findTrip(id);
+  if(sel){
+    if(loc && !(loc.r===sel.r && loc.c===sel.c)){ beep(false); toast(cellName(loc.r,loc.c) + ' already holds trip ' + id, true); return; }
+    S.rows[sel.r][sel.c] = id;
+    toast('Replaced ' + cellName(sel.r, sel.c) + ' with trip ' + id);
+    sel = null;
+  }else{
+    if(loc){ beep(false); toast('Trip ' + id + ' is already in ' + cellName(loc.r,loc.c), true); return; }
+    S.rows[S.active].push(id);
+    toast(cellName(S.active, S.rows[S.active].length-1) + ' = trip ' + id);
+  }
+  beep(true); renderGrid(); renderTools(); save();
+  const nx = document.querySelector('.cell.next'); if(nx) nx.scrollIntoView({block:'nearest', inline:'nearest'});
+}
+
+function showResult(res){
+  const el = $('result');
+  if(!res){
+    el.className = 'result';
+    el.innerHTML = '<div class="title">Scan a bill</div><div class="sub2">Point the camera at the ASN code on the cover sheet.</div>';
+    return;
+  }
+  el.className = 'result ' + res.kind;
+  el.innerHTML = res.html;
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function sortScan(text){
+  const ents = lookupAsn(text);
+  hits = [];
+  if(!ents.length){
+    beep(false);
+    showResult({kind:'bad', html:'<div class="title">ASN not found</div><div class="sub">' + esc(text) + '</div><div class="sub2">It is not in the PO Listing.</div>'});
+    renderGrid(); return;
+  }
+  const withTrip = ents.filter(e => e.TripID);
+  const vendors = [...new Set(ents.map(e => e.Vendor).filter(Boolean))].join(', ');
+  const pos = [...new Set(ents.map(e => e['PO Num']))].join(', ');
+  if(!withTrip.length){
+    beep(false);
+    showResult({kind:'warn', html:'<div class="title">No trip for this bill</div><div class="sub">PO ' + esc(pos) + '</div><div class="sub2">' + esc(vendors) + ' · not found in OrderSearch</div>'});
+    renderGrid(); return;
+  }
+  const trips = [...new Set(withTrip.map(e => e.TripID))];
+  const found = [], missing = [];
+  for(const t of trips){
+    const loc = findTrip(t);
+    if(loc) found.push({trip:t, loc}); else missing.push(t);
+  }
+  const asn = ents[0].ASN;
+  if(!found.length){
+    beep(false);
+    showResult({kind:'warn', html:'<div class="title">Trip not in grid</div><div class="sub">Trip ' + esc(missing.join(', ')) + '</div><div class="sub2">' + esc(vendors) + ' · ASN ' + esc(asn) + '</div>'});
+    renderGrid(); return;
+  }
+  const again = S.sorted.includes(asn);
+  if(!again) S.sorted.push(asn);
+  hits = found.map(f => f.loc);
+  const labels = found.map(f => cellName(f.loc.r, f.loc.c));
+  const bigText = labels.join(' + ');
+  const stops = found.map(f => { const e = withTrip.find(x => x.TripID===f.trip); return 'Trip ' + f.trip + (e && e.StopNum ? ' · Stop ' + e.StopNum : ''); }).join(' | ');
+  let html = '<div class="big' + (bigText.length>3 ? ' sm' : '') + '">' + esc(bigText) + '</div>' +
+             '<div class="sub">' + esc(stops) + '</div>' +
+             '<div class="sub2">' + esc(vendors) + ' · PO ' + esc(pos) + '</div>';
+  if(again) html += '<span class="tag">Already sorted</span>';
+  if(missing.length) html += '<div class="sub2">Trip ' + esc(missing.join(', ')) + ' is not in the grid.</div>';
+  beep(true);
+  showResult({kind:'ok', html});
+  renderGrid(); renderProg(); save();
+  const t = document.querySelector('.cell.target'); if(t) t.scrollIntoView({block:'nearest', inline:'center'});
+}
+
+/* ---------- Camera ---------- */
+const video = $('video');
+const canvas = document.createElement('canvas');
+const ctx = canvas.getContext('2d', {willReadFrequently:true});
+let stream = null, running = false, timer = null, busy = false, idleT = null, wake = null, reader = null, hints = null;
+
+function initReader(){
+  if(reader) return true;
+  if(typeof ZXing === 'undefined') return false;
+  hints = new Map();
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+    ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.PDF_417,
+    ZXing.BarcodeFormat.AZTEC, ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39
+  ]);
+  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  reader = new ZXing.MultiFormatReader();
+  reader.setHints(hints);
+  return true;
+}
+function overlay(show, msg, label){
+  $('camOverlay').hidden = !show;
+  $('camMsg').textContent = msg || '';
+  if(label) $('camGo').textContent = label;
+  $('pauseBtn').textContent = running ? 'Pause' : 'Resume';
+}
+async function setWake(on){
+  try{
+    if(on && 'wakeLock' in navigator){ if(!wake) wake = await navigator.wakeLock.request('screen'); }
+    else if(wake){ await wake.release(); wake = null; }
+  }catch(e){ wake = null; }
+}
+function resetIdle(){
+  clearTimeout(idleT);
+  if(running) idleT = setTimeout(() => stopCam('Paused to save battery.', 'Tap to resume'), IDLE_MS);
+}
+async function startCam(){
+  if(running) return;
+  if(!initReader()){ overlay(true, 'Barcode library did not load. Check your connection and reload.', 'Try again'); return; }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ overlay(true, 'Camera is not available here. Open this page over HTTPS in Safari.', 'Try again'); return; }
+  overlay(true, 'Starting camera…');
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio:false,
+      video:{ facingMode:{ideal:'environment'}, width:{ideal:CAM_WIDTH}, height:{ideal:CAM_HEIGHT}, frameRate:{ideal:CAM_FPS, max:CAM_FPS+5} }
+    });
+    video.srcObject = stream;
+    await video.play();
+    const track = stream.getVideoTracks()[0];
+    try{ await track.applyConstraints({advanced:[{focusMode:'continuous'}]}); }catch(e){}
+    running = true;
+    overlay(false);
+    setWake(true); resetIdle(); loop();
+  }catch(e){
+    running = false;
+    overlay(true, e && e.name==='NotAllowedError' ? 'Camera access is blocked. Allow it in Settings > Safari > Camera, then try again.' : 'Could not start the camera.', 'Try again');
+  }
+}
+function stopCam(msg, label){
+  running = false;
+  clearTimeout(timer); clearTimeout(idleT);
+  if(stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  setWake(false);
+  overlay(true, msg || '', label || 'Start camera');
+}
+function loop(){
+  if(!running) return;
+  timer = setTimeout(loop, SCAN_MS);
+  if(document.hidden || busy || video.readyState < 2) return;
+  busy = true;
+  try{
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if(!vw || !vh) return;
+    const sw = Math.round(vw*0.7), sh = Math.round(vh*0.7);
+    const sx = (vw-sw)>>1, sy = (vh-sh)>>1;
+    const k = Math.min(1, 640/sw);
+    const cw = Math.round(sw*k), ch = Math.round(sh*k);
+    if(canvas.width!==cw) canvas.width = cw;
+    if(canvas.height!==ch) canvas.height = ch;
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+    const src = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src));
+    const res = reader.decodeWithState(bmp);
+    if(res) onScan(res.getText());
+  }catch(e){ /* nothing readable in this frame */ }
+  finally{ busy = false; }
+}
+$('camGo').onclick = startCam;
+$('pauseBtn').onclick = () => running ? stopCam('Camera paused.', 'Resume') : startCam();
+$('typeBtn').onclick = () => {
+  const v = prompt(S.mode==='grid' ? 'Type the trip ID' : 'Type the ASN');
+  if(v) onScan(v, true);
+};
+document.addEventListener('pointerdown', () => { if(running) resetIdle(); });
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden) return;
+  if(running){
+    const tr = stream && stream.getVideoTracks()[0];
+    if(!tr || tr.readyState==='ended'){ stopCam(); startCam(); } else setWake(true);
+  }
+});
+
+/* ---------- Menu ---------- */
+const scrim = $('scrim');
+$('menuBtn').onclick = () => scrim.hidden = false;
+$('mClose').onclick = () => scrim.hidden = true;
+scrim.addEventListener('click', e => { if(e.target===scrim) scrim.hidden = true; });
+$('mReset').onclick = () => {
+  if(!confirm('Mark all bills as not sorted?')) return;
+  S.sorted = []; hits = []; showResult(null); renderGrid(); renderProg(); save(); scrim.hidden = true;
+};
+$('mClear').onclick = () => {
+  if(!confirm('Clear the whole grid and sorted bills?')) return;
+  S.rows = [[]]; S.active = 0; S.sorted = []; sel = null; hits = [];
+  showResult(null); renderGrid(); renderTools(); renderProg(); save(); scrim.hidden = true;
+};
+$('mExport').onclick = () => {
+  const blob = new Blob([JSON.stringify(S.asns, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'asns.json';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  scrim.hidden = true;
+};
+$('mNew').onclick = () => {
+  if(!confirm('Discard the grid and load new files?')) return;
+  stopCam();
+  try{ localStorage.removeItem(STORE); }catch(e){}
+  S = { asns:[], stats:{total:0,matched:0}, rows:[[]], active:0, sorted:[], mode:'grid' };
+  poRows = osRows = null; sel = null; hits = [];
+  $('filePO').value = ''; $('fileOS').value = '';
+  setDrop('po','','No file chosen'); setDrop('os','','No file chosen');
+  scrim.hidden = true;
+  $('screenScan').hidden = true; $('screenUpload').hidden = false;
+};
+
+/* ---------- Boot ---------- */
+if(load()){ enterScan(); startCam(); }
+})();
+</script>
+</body>
+</html>
