@@ -186,6 +186,8 @@ button:focus-visible,label:focus-within{outline:3px solid var(--blue);outline-of
 <div class="toast" id="toast" hidden></div>
 <div class="scrim" id="scrim" hidden>
   <div class="sheet">
+    <button class="btn alt" id="mUnmatched">Show unmatched orders</button>
+    <div id="unmatchedBox" hidden style="max-height:30dvh;overflow:auto;font-size:14px;border:2px solid var(--line);border-radius:4px;padding:8px;-webkit-user-select:text;user-select:text"></div>
     <button class="btn alt" id="mReset">Reset sorted bills</button>
     <button class="btn alt" id="mClear">Clear grid</button>
     <button class="btn alt" id="mExport">Download asns.json</button>
@@ -231,7 +233,15 @@ function load(){
 }
 
 /* ---------- Helpers ---------- */
-const clean = v => v == null ? '' : String(v).trim();
+const clean = v => v == null ? '' : String(v).replace(/[\u200B-\u200D\uFEFF]/g,'').replace(/\u00A0/g,' ').replace(/^'+/,'').trim();
+// Tolerant key for matching PO numbers: ignores spaces/punctuation, trailing ".0" and leading zeros
+function normKey(v){
+  let s = clean(v);
+  if(/^\d+\.0+$/.test(s)) s = s.replace(/\.0+$/,'');
+  return s.replace(/[^0-9A-Za-z]/g,'').toUpperCase().replace(/^0+(?=.)/,'');
+}
+// Plain ID cleanup (trip IDs etc.): drop a trailing ".0"
+const idStr = v => { const s = clean(v); return /^\d+\.0+$/.test(s) ? s.replace(/\.0+$/,'') : s; };
 function rowName(n){ let s='', x=n+1; while(x>0){ const m=(x-1)%26; s=String.fromCharCode(65+m)+s; x=Math.floor((x-1)/26);} return s; }
 const cellName = (r,c) => rowName(r) + (c+1);
 function findTrip(id){
@@ -303,15 +313,16 @@ function buildData(){
   // OrderSearch: only Stop Order rows
   const stopMap = new Map();
   for(const r of osRows){
-    if(r.ordertype.toLowerCase() !== 'stop order') continue;
-    if(r.ordercode && !stopMap.has(r.ordercode)) stopMap.set(r.ordercode, {TripID:r.tripid, StopNum:r.stopnum});
+    if(r.ordertype.replace(/\s+/g,' ').toLowerCase() !== 'stop order') continue;
+    const k = normKey(r.ordercode);
+    if(k && !stopMap.has(k)) stopMap.set(k, {TripID:idStr(r.tripid), StopNum:idStr(r.stopnum)});
   }
   // PO Listing: every row with an ASN
   const asns = [];
   for(const r of poRows){
     if(!r.asn) continue;
-    const o = {'PO Num': r['po num'], 'Vendor': r.vendor, 'ASN': r.asn};
-    const m = stopMap.get(o['PO Num']);
+    const o = {'PO Num': idStr(r['po num']), 'Vendor': r.vendor, 'ASN': idStr(r.asn)};
+    const m = stopMap.get(normKey(r['po num']));
     if(m && m.TripID){ o.TripID = m.TripID; o.StopNum = m.StopNum; }
     asns.push(o);
   }
@@ -625,6 +636,19 @@ const scrim = $('scrim');
 $('menuBtn').onclick = () => scrim.hidden = false;
 $('mClose').onclick = () => scrim.hidden = true;
 scrim.addEventListener('click', e => { if(e.target===scrim) scrim.hidden = true; });
+$('mUnmatched').onclick = () => {
+  const box = $('unmatchedBox');
+  if(!box.hidden){ box.hidden = true; return; }
+  const seen = new Set(), list = [];
+  for(const a of S.asns){
+    if(a.TripID || seen.has(a['PO Num'])) continue;
+    seen.add(a['PO Num']); list.push(a);
+  }
+  box.innerHTML = list.length
+    ? '<b>' + list.length + ' unmatched</b> (PO · vendor · ASN)<br>' + list.map(a => esc(a['PO Num']) + ' · ' + esc(a.Vendor) + ' · ' + esc(a.ASN)).join('<br>')
+    : 'Every order with an ASN was matched.';
+  box.hidden = false;
+};
 $('mReset').onclick = () => {
   if(!confirm('Mark all bills as not sorted?')) return;
   S.sorted = []; hits = []; showResult(null); renderGrid(); renderProg(); save(); scrim.hidden = true;
